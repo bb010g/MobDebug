@@ -1,0 +1,3 @@
+[submodule "luasocket_luacats_addon"]
+	path = .luacats_addons/luasocket/module
+	url = https://github.com/LuaCATS/luasocket.git
