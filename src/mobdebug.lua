@@ -460,12 +460,14 @@ end
 
 ---@class MobDebug.Socket
 ---@field s TCPSocketClient
+---@field server_sock (TCPSocketServer | nil)
 ---@field buf (string | nil)
 local Socket = {} do
 
----@param s TCPSocketClient
+---@param sock TCPSocketClient
+---@param server_sock (TCPSocketServer | nil)
 ---@return MobDebug.Socket self
-function Socket.new(s)
+function Socket.new(sock, server_sock)
   local self = {}
   ---@diagnostic disable-next-line: no-unknown
   for k, v in pairs(Socket) do
@@ -473,7 +475,8 @@ function Socket.new(s)
     self[k] = v
   end
 
-  self.s   = s
+  self.s = sock
+  self.server_sock = server_sock
   ---@type (string | nil)
   self.buf = nil
 
@@ -710,8 +713,12 @@ end
 function Socket:close()
   if self.s then
     self.s:close()
+    if self.server_sock then
+      self.server_sock:close()
+    end
     self.buf = nil
     self.s = nil
+    self.server_sock = nil
   end
 end
 
@@ -2437,27 +2444,44 @@ end
 
 ---@param controller_host string `address`
 ---@param controller_port integer
+---@param serve boolean Whether to serve over TCP
 ---@return (MobDebug.Socket | nil) sock
 ---@return (nil | string)? err
-local function connect(controller_host, controller_port)
-  local sock, err = socket.tcp()
-  if not sock then return nil, err end
+local function connect(controller_host, controller_port, serve)
+  local client_sock, err = socket.tcp()
+  if not client_sock then return nil, err end
 
-  if sock.settimeout then sock:settimeout(mobdebug.connecttimeout) end
+  if client_sock.settimeout then client_sock:settimeout(mobdebug.connecttimeout) end
   ---@diagnostic disable-next-line: invisible
   local port = string.find(socket._VERSION, "^LuaSocket 2%.") and tostring(controller_port) or controller_port
-  ---@diagnostic disable-next-line: redefined-local
-  local res, err = sock:connect(
-    controller_host,
-    ---@diagnostic disable-next-line: param-type-mismatch
-    port
-  )
-  if sock.settimeout then sock:settimeout() end
+  ---@type (1 | nil), (TCPSocketServer | nil)
+  local res, server_sock
+  if serve then
+    res, err = client_sock:bind(
+      controller_host,
+      ---@diagnostic disable-next-line: param-type-mismatch
+      port
+    )
+    if not res then return nil, err end
+    res, err = client_sock:listen(1)
+    if not res then return nil, err end
+    ---@cast client_sock TCPSocketServer
+    server_sock = client_sock
+    client_sock, err = server_sock:accept()
+    if not client_sock then return nil, err end
+  else
+    ---@diagnostic disable-next-line: redefined-local
+    res, err = client_sock:connect(
+      controller_host,
+      ---@diagnostic disable-next-line: param-type-mismatch
+      port
+    )
+    if not res then return nil, err end
+    ---@cast client_sock TCPSocketClient
+  end
+  if client_sock.settimeout then client_sock:settimeout() end
 
-  if not res then return nil, err end
-  ---@cast sock TCPSocketClient
-  ---@diagnostic disable-next-line: redefined-local
-  local sock = Socket.new(sock)
+  local sock = Socket.new(client_sock, server_sock)
   return sock
 end
 
@@ -2467,8 +2491,9 @@ local lasthost, lastport
 -- Starts a debug session by connecting to a controller
 ---@param controller_host (string | nil) `address`
 ---@param controller_port (integer | nil)
+---@param serve (boolean | nil) Whether to server over TCP
 ---@return boolean
-local function start(controller_host, controller_port)
+local function start(controller_host, controller_port, serve)
   -- only one debugging session can be run (as there is only one debug hook)
   if is_running() then return false end
 
@@ -2479,7 +2504,7 @@ local function start(controller_host, controller_port)
   controller_port = lastport or mobdebug.port
 
   local err
-  server, err = mobdebug.connect(controller_host, controller_port)
+  server, err = mobdebug.connect(controller_host, controller_port, serve)
   if server then
     -- correct stack depth which already has some calls on it
     -- so it doesn't go into negative when those calls return
@@ -3081,8 +3106,8 @@ local function listen(host, port)
   print("Lua Remote Debugger")
   print("Run the program you wish to debug")
 
-  local client_socket = socket.bind(host, port)
-  local client = client_socket:accept()
+  local server_socket = socket.bind(host, port)
+  local client = server_socket:accept()
   if client == nil then
     error("client is nil")
   end
