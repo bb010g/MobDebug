@@ -949,7 +949,7 @@ local function debug_hook(event, line)
 
     local caller = debug.getinfo(2, "S")
 
-    -- uJIT in case of `ujit -e require'mobdebug'.start()` 
+    -- uJIT in case of `ujit -e require'mobdebug'.start()`
     -- start execution with this file name - skip it
     if caller.source == '=(command line)' then
       return
@@ -1486,12 +1486,12 @@ local function pcall_vararg_pack(status, ...)
 end
 
 -- Motivation:
--- when deal with the system running in the docker 
+-- when deal with the system running in the docker
 -- file path may differ from the local one.
 -- E.g. in the docker Lua files may be installed via package manager
--- to the `/var/lib/some_library` directory. But on the 
+-- to the `/var/lib/some_library` directory. But on the
 -- developers system thouse files placed in the `~/projects/some_library`
--- As result to be able to debug there needs 
+-- As result to be able to debug there needs
 -- to convert `/var/lib/some_library` to `~/projects/some_library` for step by step debugging
 -- and convert `~/projects/some_library` to `/var/lib/some_library` when set breakpoints
 local fix_file_name do
@@ -1556,19 +1556,26 @@ function vscode_debugger.receive_message(sync)
       return nil, err
     end
 
-    if (string_sub(header, 1, 1) ~= '#') then
+    if (string_sub(header, 1, 16) ~= 'Content-Length: ') then
       return vscode_debugger.proto_error('Invalid header:' .. header)
     end
 
-    vscode_message_size = tonumber(string_sub(header, 2))
+    vscode_message_size = tonumber(string_sub(header, 17))
     if (not vscode_message_size) or (vscode_message_size < 0) then
       return vscode_debugger.proto_error('Invalid header:' .. header)
     end
+    vscode_message_size = vscode_message_size + 2
   end
 
   local message, err = server:receive_nread(vscode_message_size, sync)
   if not message then
     return nil, err
+  end
+  if vscode_message_size then
+    if (string_sub(message, 1, 2) ~= '\r\n') then
+      return vscode_debugger.proto_error('Invalid message (missing post-header "\\r\\n"):' .. message)
+    end
+    message = string_sub(message, 3)
   end
 
   vscode_message_size = nil
@@ -1977,7 +1984,7 @@ function debugger.loop_detect_protocol()
 
   local data, err
   while true do
-    data, err = server:peek(1, true)
+    data, err = server:peek(16, true)
     if data then
       break
     end
@@ -1992,7 +1999,7 @@ function debugger.loop_detect_protocol()
 
   if server.settimeout then server:settimeout() end -- back to blocking
 
-  state.protocol = (data == '#') and PROTOCOLS.VSCODE or PROTOCOLS.MOBDEBUG
+  state.protocol = (data == 'Content-Length: ') and PROTOCOLS.VSCODE or PROTOCOLS.MOBDEBUG
 end
 
 function debugger.loop(sev, svars, sfile, sline)
