@@ -669,8 +669,8 @@ end
 
 ---@param str string
 ---@return (boolean | nil) success
----@return string? err
----@return integer? total_sent
+---@return (string | nil) err
+---@return integer total_sent
 function Socket:nsend(str)
   local total_sent, attempt = 0, 5
   while total_sent < #str do
@@ -679,7 +679,7 @@ function Socket:nsend(str)
       if sent == 0 then
         attempt = attempt - 1
         if attempt == 0 then
-          return nil, err or 'no progress'
+          return nil, err or 'no progress', total_sent
         end
       else
         total_sent = total_sent + sent
@@ -688,7 +688,7 @@ function Socket:nsend(str)
       return nil, err, total_sent
     end
   end
-  return true
+  return true, nil, total_sent
 end
 
 ---@return boolean is_pending
@@ -2074,7 +2074,7 @@ function vscode_debugger.loop(sev, svars, sfile, sline)
     if server.settimeout then server:settimeout() end -- back to blocking
 
     command, args = req.command, req.arguments or {}
-    Log.format('New command: %s', tostring(command))
+    Log.format('New command: %s %s', tostring(command), serpent.block(args))
 
     if command == 'welcome' then
       set_basedir(args.sourceBasePath)
@@ -2083,6 +2083,14 @@ function vscode_debugger.loop(sev, svars, sfile, sline)
       vscode_pathmap = args.pathMap
       vscode_init_failure = false
       -- No response
+    elseif command == 'initialize' then
+      if not args.supportsStartDebuggingRequest then
+        vscode_debugger.send_failure(req, 'Initialization failure: supportsStartDebuggingRequest is required')
+        coroyield("done")
+        return
+      end
+      vscode_dir_sep = '/'
+      -- TODO: respond with initialize
     elseif command == 'configurationDone' then
       if vscode_init_failure then
         vscode_debugger.send_failure(req, 'Initialization failure')
@@ -2321,8 +2329,10 @@ function vscode_debugger.loop(sev, svars, sfile, sline)
       coroyield("done")
       return
     else
-      Log.format('Unsupported command: %s', tostring(command or '<UNKNOWN>'))
+      Log.format('Unsupported command: %s %s', tostring(command or '<UNKNOWN>'), serpent.block(args))
       vscode_debugger.send_failure(req, 'Unsupported command')
+      coroyield("done")
+      return
     end -- if command
   end -- while protocol == 'vscode'
 end
