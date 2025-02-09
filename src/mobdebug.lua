@@ -1,6 +1,6 @@
 --
 -- MobDebug -- Lua remote debugger
--- Copyright 2011-20 Paul Kulchenko
+-- Copyright 2011-23 Paul Kulchenko
 -- Based on RemDebug 1.0 Copyright Kepler Project 2005
 --
 
@@ -25,7 +25,7 @@ local os = os or prequire "os"
 
 local mobdebug = {
   _NAME = "mobdebug",
-  _VERSION = "0.804",
+  _VERSION = "0.805",
   _COPYRIGHT = "Paul Kulchenko",
   _DESCRIPTION = "Mobile Remote Debugger for the Lua programming language",
   port = os and os.getenv and tonumber((os.getenv("MOBDEBUG_PORT"))) or 8172,
@@ -134,6 +134,7 @@ local state = {
   step_over     = false,
   step_level    = 0,
   stack_level   = 0,
+  SAFEWS        = "\012", -- "safe" whitespace value
   basedir       = "",
   protocol      = nil,
   debugee = function ()
@@ -1211,6 +1212,8 @@ function mobdebug_debugger.loop(sev, svars, sfile, sline)
       -- extract any optional parameters
       local chunk, params = mobdebug_debugger.parse_exec_command(line)
       if chunk then
+        -- \r is optional, as it may be stripped by some luasocket versions, like the one in LOVE2d
+        chunk = chunk:gsub("\r?"..state.SAFEWS, "\n") -- convert safe whitespace back to new line
         local func, res = mobdebug.loadstring(chunk)
         local status
         if func then
@@ -2330,7 +2333,7 @@ local function handle(params, client, options)
     local _, _, exp = string_find(params, "^[a-z]+%s+(.+)$")
     if exp or (command == "reload") then
       if command == "eval" or command == "exec" then
-        exp = exp:gsub("\n", "\r") -- convert new lines, so the fragment can be passed as one line
+        exp = exp:gsub("\r?\n", "\r"..state.SAFEWS) -- convert new lines, so the fragment can be passed as one line
         if command == "eval" then exp = "return " .. exp end
         client:send("EXEC " .. exp .. "\n")
       elseif command == "reload" then
